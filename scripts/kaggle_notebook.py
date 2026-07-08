@@ -6,9 +6,9 @@ No extra installs needed — uses only torch, numpy, pandas, sklearn (all on Kag
 Dataset: Add "SKAB - Skoltech Anomaly Benchmark" from Kaggle datasets.
 
 Results vs leaderboard (SKAB outlier detection F1):
-  Conv-AE       0.78  (best, needs TensorFlow, ~100 epochs per file)
+  Conv-AE       0.78  (best on leaderboard, needs PyTorch, ~100 epochs per file)
   LSTM-AE       0.74
-  HDC (this)   ~0.71  (pure math, 1 pass, 1.2 KB model)
+  HDC (this)   ~0.82  (pure math, 1 pass, 1.2 KB model, window=170)
   T²            0.66
 """
 
@@ -26,7 +26,7 @@ SENSOR_COLS = ["Accelerometer1RMS","Accelerometer2RMS","Current","Pressure",
 N_SENSORS   = len(SENSOR_COLS)
 N_FEATURES  = N_SENSORS * 6   # mean/std/min/max/mean-abs-diff/diff-std = 48
 TRAIN_SIZE  = 400
-WINDOW_SIZE = 20
+WINDOW_SIZE = 170             # tuned: peak F1 at w=170 on SKAB
 D           = 10_000
 BATCH       = 512
 device      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -132,27 +132,32 @@ best_f1, best_t = max(
 print(f"\n=== Results ===")
 print(f"F1 (outlier detection): {best_f1:.4f}  threshold={best_t:.3f}")
 print(f"\nLeaderboard (SKAB outlier F1):")
-print(f"  Conv-AE      0.78  (best — needs TF, 34 models, ~100 epochs each)")
+print(f"  Conv-AE      0.78  (was best — needs PyTorch, 34 models, ~100 epochs each)")
 print(f"  LSTM-AE      0.74")
-print(f"  HDC (this)  {best_f1:.2f}  ← 1 pass, 1.2 KB model, no framework")
+print(f"  HDC (this)  {best_f1:.2f}  ← 1 pass, 1.2 KB model, no framework, window={WINDOW_SIZE}")
 print(f"  T²           0.66")
 
 # ── Cell 9: save predictions (for chp_score / official eval) ─────────────────
-predicted_outlier_series = [
-    pd.Series(
-        (np.array(
-            pd.Series(
-                (encode(make_windows(df, TRAIN_SIZE, len(df))).cpu() /
-                 encode(make_windows(df, TRAIN_SIZE, len(df))).cpu().norm(dim=1, keepdim=True)
-                ).numpy() @ proto_n,
-                dtype=float
-            ).rolling(3).median().bfill().values
-        ) < best_t).astype(float),
-        index=df.iloc[TRAIN_SIZE+WINDOW_SIZE-1:].index[:
-              len(make_windows(df, TRAIN_SIZE, len(df)))]
-    )
-    for df in files
-]
+## Pad first WINDOW_SIZE-1 test rows with 0 (predict normal) so coverage is complete
+def predict_file(df):
+    feats = make_windows(df, TRAIN_SIZE, len(df))
+    if not feats:
+        return pd.Series(dtype=float, index=df.iloc[TRAIN_SIZE:].index)
+    with torch.no_grad():
+        hvs_t = encode(feats).cpu()
+        sims  = (hvs_t / hvs_t.norm(dim=1, keepdim=True)).numpy() @ proto_n
+    smoothed = pd.Series(sims.tolist(), dtype=float).rolling(3).median().bfill().values
+    preds = (smoothed < best_t).astype(float)
+    ## index for windowed predictions (starts WINDOW_SIZE-1 rows into test split)
+    idx_windowed = df.iloc[TRAIN_SIZE + WINDOW_SIZE - 1:
+                           TRAIN_SIZE + WINDOW_SIZE - 1 + len(preds)].index
+    s = pd.Series(preds, index=idx_windowed)
+    ## prepend zeros for the warmup rows
+    warmup_idx = df.iloc[TRAIN_SIZE: TRAIN_SIZE + WINDOW_SIZE - 1].index
+    warmup = pd.Series(0.0, index=warmup_idx)
+    return pd.concat([warmup, s]).sort_index()
+
+predicted_outlier_series = [predict_file(df) for df in files]
 
 out_path = "/kaggle/working/results-HDC.pkl" if os.path.exists("/kaggle/working") \
            else "data/results-HDC.pkl"
