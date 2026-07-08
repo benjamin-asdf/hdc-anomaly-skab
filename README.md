@@ -21,27 +21,29 @@ Anomaly detection on multivariate sensor telemetry using **Hyperdimensional Comp
 | LSTM-VAE         | 0.56             |                                    |
 | Vanilla LSTM     | 0.54             |                                    |
 
-> Threshold tuned on test split — same as leaderboard entries.
+> Threshold tuned on test split — same as leaderboard entries. HDC F1 confirmed on Kaggle ([notebook](https://www.kaggle.com/code/benjaminschwerdtner/benjamin-skab-hdc)).
 
 ---
 
-## Efficiency benchmark (CPU, same evaluation protocol)
+## Efficiency benchmark (CPU)
 
-> All numbers from `scripts/benchmark_all.py` — same data, same protocol for all methods.
+HDC vs Conv-AE uses matched F1 (both 0.71 in our run, `scripts/benchmark.py`).  
+T²+Q, MSET, LSTM-AE times are from our re-implementations (`scripts/benchmark_all.py`) — their official F1 is higher than measured here, so timing comparisons should be read as ballpark estimates for methods of that complexity class, not exact reproductions.
 
-| Method       | F1    | Train time          | Model size             | Inference    | Framework     |
-|--------------|-------|---------------------|------------------------|--------------|---------------|
-| **HDC**      | **0.710** | **163 ms** (1 pass) | **1.2 KB** (binarized) | **24 µs**    | **none**      |
-| T²+Q (PCA)   | 0.698 | 92 ms               | 0.2 KB                 | 890 µs       | scipy/sklearn |
-| MSET         | 0.698 | 9,575 ms            | 12.5 KB                | 1,554 µs     | scipy/numpy   |
-| LSTM-AE      | 0.710 | 234,341 ms          | 487.5 KB               | 32,332 µs    | TensorFlow    |
+| Method       | F1 (our run) | F1 (leaderboard) | Train time          | Model size             | Inference    | Framework     |
+|--------------|--------------|------------------|---------------------|------------------------|--------------|---------------|
+| **HDC**      | **0.710**    | **0.71**         | **163 ms** (1 pass) | **1.2 KB** (binarized) | **24 µs**    | **none**      |
+| Conv-AE      | 0.710        | 0.78             | 60,000 ms           | 70.5 KB                | 66 µs        | PyTorch       |
+| T²+Q (PCA)   | 0.698        | 0.76             | 92 ms               | 0.2 KB                 | 890 µs       | scipy/sklearn |
+| MSET         | 0.698        | 0.78             | 9,575 ms            | 12.5 KB                | 1,554 µs     | scipy/numpy   |
+| LSTM-AE      | 0.710        | 0.74             | 234,341 ms          | 487.5 KB               | 32,332 µs    | TensorFlow    |
 
-Key comparisons (HDC vs methods with equal or better leaderboard F1):
-- **vs MSET (F1 0.78):** HDC 59× faster training, 64× faster inference, 10× smaller
-- **vs LSTM-AE (F1 0.74):** same F1 measured, **1441× faster training**, **399× smaller**, **1330× faster inference**
-- **vs Conv-AE (F1 0.78):** 357× faster training, 58× smaller (from `scripts/benchmark.py`)
+**Cleanest comparison — HDC vs Conv-AE** (same F1=0.71 in our run, both faithfully implemented):
+- **357× faster training**
+- **58× smaller model**
+- **No runtime framework**
 
-**HDC matches LSTM-AE accuracy at 1441× faster training, 399× smaller model.**
+For methods with higher leaderboard F1 (0.74–0.78): HDC trades ~7 points of accuracy for orders-of-magnitude lower operational cost.
 
 ---
 
@@ -110,7 +112,8 @@ clj -P
 clj -M -m bjs-drones.skab
 
 # Python — efficiency benchmark (needs SKAB data in data/skab/)
-python scripts/benchmark_all.py
+python scripts/benchmark.py       # HDC vs Conv-AE (cleanest comparison)
+python scripts/benchmark_all.py   # HDC vs all methods
 
 # Kaggle notebook — run locally
 SKAB_DATA_DIR=data/skab/data python scripts/kaggle_notebook.py
